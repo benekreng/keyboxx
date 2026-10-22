@@ -40,15 +40,39 @@ function openCredentials(flags) {
   return new EnvFile(credentialsPath(flags['env-file']));
 }
 
-// Look up keys and fail with a helpful message that lists names, never values.
-function lookup(creds, names) {
+// Find a key by its name, or by service when only one key has that service.
+// Errors list names and purposes so an agent can pick, but never values.
+function findKey(creds, query) {
+  const exact = creds.get(query);
+  if (exact) return exact;
+  const q = query.toLowerCase();
+  const matches = creds.entries.filter((e) => e.name.toLowerCase() === q || (e.meta.service || '').toLowerCase() === q);
+  if (matches.length === 1) return matches[0];
+  const describe = (list) => list.map((e) => `  ${e.name}  ${[e.meta.service, e.meta.purpose].filter(Boolean).join(' - ')}`).join('\n');
+  if (matches.length > 1) throw new UsageError(`"${query}" matches several keys, use a name:\n${describe(matches)}`);
+  throw new UsageError(
+    `no key matches "${query}"\navailable:\n${describe(creds.entries) || '  (none)'}\nIf it's missing, ask the user to run: keyboxx add`
+  );
+}
+
+// Targets look like "KEY" or "VAR=KEY" (write KEY under the variable VAR).
+function resolve(creds, targets, as) {
   if (!creds.exists) throw new UsageError(`no credentials file at ${tilde(creds.file)} yet. Add a key with: keyboxx add`);
-  const missing = names.filter((n) => !creds.get(n));
-  if (missing.length) {
-    const have = [...new Set(creds.entries.map((e) => e.name))].join(', ') || '(none)';
-    throw new UsageError(`unknown key: ${missing.join(', ')}\navailable: ${have}\nIf it's missing, ask the user to run: keyboxx add`);
-  }
-  return names.map((n) => creds.get(n));
+  if (as && targets.length > 1) throw new UsageError('--as works with a single key only. For several, use VAR=KEY');
+  return targets.map((t) => {
+    const eq = t.indexOf('=');
+    const [varName, query] = eq > 0 ? [t.slice(0, eq), t.slice(eq + 1)] : [as, t];
+    const entry = findKey(creds, query);
+    const v = varName || entry.name;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(v)) throw new UsageError(`"${v}" is not a valid variable name`);
+    return { entry, varName: v };
+  });
+}
+
+function uniqueName(creds, base) {
+  let name = base;
+  for (let i = 2; creds.get(name); i++) name = `${base}_${i}`;
+  return name;
 }
 
 function defaultVarName(service) {
@@ -68,34 +92,39 @@ async function readStdin() {
 async function cmdAdd({ pos, flags }) {
   const creds = openCredentials(flags);
   const interactive = process.stdin.isTTY;
-  const firstTime = !creds.exists;
 
-  let service = flags.service, purpose = flags.purpose, name = flags.name ?? pos[0];
+  let service = flags.service, purpose = flags.purpose;
   if (interactive) {
-    if (firstTime) err(`Creating your credentials file at ${tilde(creds.file)}\n`);
+    if (!creds.exists) err(`Creating your credentials file at ${tilde(creds.file)}\n`);
     service ??= await ask('Service (e.g. OpenAI)');
     if (!service) throw new UsageError('service is required');
     purpose ??= await ask('Purpose (optional)');
-    name ??= await ask('Variable name', defaultVarName(service));
   } else if (!service) {
     throw new UsageError('not a terminal: use --service and pipe the key on stdin, e.g.\n  pbpaste | keyboxx add --service OpenAI --purpose work');
   }
-  name ??= defaultVarName(service);
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new UsageError(`"${name}" is not a valid variable name`);
+  purpose ||= '';
 
-  const existing = creds.get(name);
-  if (existing && !flags.yes) {
-    const what = existing.meta.service ? ` (${existing.meta.service})` : '';
-    if (!interactive) throw new UsageError(`${name} already exists${what}. Use --yes to replace it.`);
-    if (!(await confirm(`${name} already exists${what}. Replace it?`, false))) return err('Nothing changed.');
+  // Same service and purpose means replacing that key; anything else is a new key.
+  const same = creds.entries.find((e) =>
+    (e.meta.service || '').toLowerCase() === service.toLowerCase() && (e.meta.purpose || '').toLowerCase() === purpose.toLowerCase());
+  let name = flags.name ?? pos[0];
+  if (same && !name) {
+    const what = `${service}${purpose ? ` (${purpose})` : ''}`;
+    if (!flags.yes) {
+      if (!interactive) throw new UsageError(`a key for ${what} already exists. Use --yes to replace it.`);
+      if (!(await confirm(`A key for ${what} already exists. Replace it?`, false))) return err('Nothing changed.');
+    }
+    name = same.name;
   }
+  name ??= uniqueName(creds, defaultVarName(service));
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new UsageError(`"${name}" is not a valid name`);
 
   const value = interactive ? await askHidden('Key (input hidden): ') : await readStdin();
   if (!value.trim()) throw new UsageError('empty key, nothing saved');
 
   creds.set(name, value.trim(), { service, purpose });
   creds.save();
-  err(`Saved ${name} (${mask(value.trim())}) to ${tilde(creds.file)}`);
+  err(`Saved ${service} key (${mask(value.trim())}) as ${name}`);
 }
 
 function cmdList({ flags }) {
@@ -105,23 +134,22 @@ function cmdList({ flags }) {
   }));
   if (flags.json) return console.log(JSON.stringify(rows, null, 2));
   if (!rows.length) return console.log(`No keys yet in ${tilde(creds.file)}. Add one with: keyboxx add`);
-  const cols = ['name', 'service', 'purpose', 'preview'];
+  const cols = ['service', 'purpose', 'preview', 'name'];
   const w = Object.fromEntries(cols.map((c) => [c, Math.max(c.length, ...rows.map((r) => r[c].length))]));
   const fmt = (r) => cols.map((c) => r[c].padEnd(w[c])).join('  ').trimEnd();
   console.log(fmt(Object.fromEntries(cols.map((c) => [c, c.toUpperCase()]))));
   rows.forEach((r) => console.log(fmt(r)));
+  console.log("\nUse: keyboxx pull <service or name> --as <VARIABLE>   (details: keyboxx --help)");
 }
 
 function cmdPull({ pos, flags }) {
-  if (!pos.length) throw new UsageError('usage: keyboxx pull NAME... [--into FILE] [--as VAR]');
-  if (flags.as && pos.length > 1) throw new UsageError('--as works with a single key only');
-  const entries = lookup(openCredentials(flags), pos);
+  if (!pos.length) throw new UsageError('usage: keyboxx pull KEY [--as VAR] [--into FILE]   or   keyboxx pull VAR=KEY...');
+  const picks = resolve(openCredentials(flags), pos, flags.as);
   const target = new EnvFile(expandHome(flags.into || '.env'));
-  for (const e of entries) {
-    const varName = flags.as || e.name;
-    const how = target.set(varName, e.value);
-    const label = varName === e.name ? varName : `${e.name} as ${varName}`;
-    console.log(`${how} ${label} (${mask(e.value)}) in ${tilde(target.file)}`);
+  for (const { entry, varName } of picks) {
+    const how = target.set(varName, entry.value);
+    const from = [entry.meta.service, entry.meta.purpose].filter(Boolean).join(', ') || entry.name;
+    console.log(`${how} ${varName} (${from}, ${mask(entry.value)}) in ${tilde(target.file)}`);
   }
   target.save();
   const r = spawnSync('git', ['check-ignore', '-q', target.file], { cwd: path.dirname(target.file), stdio: 'ignore' });
@@ -129,10 +157,10 @@ function cmdPull({ pos, flags }) {
 }
 
 function cmdRun({ pos, flags, rest }) {
-  if (!pos.length || !rest?.length) throw new UsageError('usage: keyboxx run NAME... -- COMMAND [ARGS...]');
-  const entries = lookup(openCredentials(flags), pos);
+  if (!pos.length || !rest?.length) throw new UsageError('usage: keyboxx run KEY|VAR=KEY... -- COMMAND [ARGS...]');
+  const picks = resolve(openCredentials(flags), pos, flags.as);
   const env = { ...process.env };
-  for (const e of entries) env[e.name] = e.value;
+  for (const { entry, varName } of picks) env[varName] = entry.value;
   const child = spawn(rest[0], rest.slice(1), { stdio: 'inherit', env });
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => child.kill(sig));
   child.on('error', (e) => { err(`keyboxx: could not start ${rest[0]}: ${e.message}`); process.exit(127); });
@@ -148,14 +176,14 @@ function cmdGet({ pos, flags }) {
       'To run a command:      keyboxx run NAME -- your-command'
     );
   }
-  const [e] = lookup(openCredentials(flags), pos);
+  const [{ entry: e }] = resolve(openCredentials(flags), pos);
   process.stdout.write(e.value + (process.stdout.isTTY ? '\n' : ''));
 }
 
 async function cmdRm({ pos, flags }) {
   if (pos.length !== 1) throw new UsageError('usage: keyboxx rm NAME');
   const creds = openCredentials(flags);
-  const [e] = lookup(creds, pos);
+  const [{ entry: e }] = resolve(creds, pos);
   if (!flags.yes) {
     if (!process.stdin.isTTY) throw new UsageError('use --yes to confirm removal');
     if (!(await confirm(`Remove ${e.name} (${e.meta.service || 'no service'})?`, false))) return err('Nothing changed.');
@@ -180,39 +208,59 @@ function cmdUse({ pos }) {
 
 const AGENT_SNIPPET = `## API keys
 
-API keys are managed with \`keyboxx\`. Never print, echo, cat or grep key values,
+The user's API keys are in \`keyboxx\`. Never print, echo, cat or grep key values,
 and never read .env files or the keyboxx credentials file directly.
 
-- \`keyboxx list\` shows which keys exist (values are masked)
-- \`keyboxx pull NAME --into .env\` writes a key into an env file
-- \`keyboxx pull NAME --as OTHER_VAR --into .env\` writes it under a different variable name
-- \`keyboxx run NAME -- <command>\` runs a command with the key in its environment
+When a project needs a key:
+1. Find the variable name the project expects (code, README, .env.example).
+2. Run \`keyboxx list\` and pick the key by service and purpose.
+   If it's unclear which key fits, ask the user.
+3. Run \`keyboxx pull <service or name> --as <VARIABLE> --into .env\`
+   Several at once: \`keyboxx pull OPENAI_KEY=openai STRIPE_SECRET=stripe\`
+4. Or skip the file: \`keyboxx run OPENAI_KEY=openai -- <command>\`
 
-Do not use \`keyboxx get --raw\`. If a key is missing, ask the user to add it with \`keyboxx add\`.
+If no key fits, ask the user to add one with \`keyboxx add\`. Never use \`keyboxx get --raw\`.
 `;
 
-const HELP = `keyboxx - hand API keys to agents without them ever seeing the value
+const HELP = `keyboxx - copy the user's API keys into place without seeing them
 
-Your keys live in one plain dotenv file (see \`keyboxx path\`), so tools like
-\`uv run --env-file\` and \`docker compose --env-file\` can read it directly.
+AGENTS: how to give a project an API key
+  1. Find the variable name the project expects (code, README, .env.example).
+  2. keyboxx list
+       Shows service, purpose, a masked preview and a name for each key.
+       Pick by service and purpose. If it's unclear which key fits, ask the user.
+  3. keyboxx pull <KEY> --as <VARIABLE>
+       Writes VARIABLE=<value> into ./.env. Prints only a masked preview.
+     or: keyboxx run <VARIABLE>=<KEY> -- <command>
+       Runs the command with the key set, without writing a file.
 
-For you:
-  keyboxx add [NAME]                 add a key (asks for service, purpose, key)
-  keyboxx rm NAME                    remove a key
-  keyboxx use PATH                   use an existing credentials file
-  keyboxx path                       print the credentials file location
+  <KEY> is a service like "openai". If one service has several keys,
+  use the name from keyboxx list instead.
 
-For agents (and you):
-  keyboxx list [--json]              list keys with masked previews
-  keyboxx pull NAME... [--into FILE] [--as VAR]
-                                    write keys into an env file (default ./.env)
-  keyboxx run NAME... -- CMD         run CMD with the keys set as env vars
-  keyboxx get NAME --raw             print a key (only when you really need it)
-  keyboxx agents                     print instructions to paste into AGENTS.md / CLAUDE.md
+  Rules: never print, cat or grep key values, .env files or the credentials
+  file. Don't use get --raw. If no key fits, ask the user to run: keyboxx add
 
-Options:
-  --env-file PATH                   use this credentials file for one command
-                                    (or set KEYBOXX_ENV_FILE)
+Examples
+  keyboxx pull openai --as OPENAI_KEY
+  keyboxx pull OPENAI_KEY=openai STRIPE_SECRET=stripe --into .env.local
+  keyboxx run DATABASE_URL=neon -- npm run migrate
+
+All commands
+  list [--json]                  keys with service, purpose, masked preview
+  pull KEY --as VAR              write a key into ./.env as VAR
+  pull VAR=KEY...                same, several keys at once
+    --into FILE                  write to FILE instead of ./.env
+  run VAR=KEY... -- CMD          run CMD with the keys as env vars
+  get KEY --raw                  print a key value (humans only)
+  add                            add a key, asks for service, purpose, key (humans only)
+  rm KEY                         remove a key
+  use PATH                       use an existing dotenv file as the credentials file
+  path                           print the credentials file location
+  agents                         print instructions for AGENTS.md / CLAUDE.md
+
+Options
+  --env-file PATH                use this credentials file for one command
+                                 (or set KEYBOXX_ENV_FILE)
 `;
 
 const COMMANDS = {

@@ -3,11 +3,11 @@
 Give AI agents your API keys without them ever seeing the value.
 
 ```bash
-keyboxx pull OPENAI_API_KEY --into .env
-# added OPENAI_API_KEY (sk-…wxyz) in ./.env
+keyboxx pull openai --as OPENAI_KEY --into .env
+# added OPENAI_KEY (OpenAI, sk-…wxyz) in ./.env
 ```
 
-Your keys live in one plain dotenv file. Agents copy them where they're needed and see only a masked preview.
+You store a key once with a service and purpose. The agent finds the variable name the project wants and writes the key under that name. It only sees a masked preview.
 
 ## Install
 
@@ -23,7 +23,6 @@ Node 18+. No dependencies.
 keyboxx add
 # Service (e.g. OpenAI): OpenAI
 # Purpose (optional): side projects
-# Variable name [OPENAI_API_KEY]:
 # Key (input hidden):
 ```
 
@@ -33,12 +32,14 @@ Or pipe it: `pbpaste | keyboxx add --service OpenAI`
 
 | Command | Does |
 | --- | --- |
-| `keyboxx list` | Names and masked previews |
-| `keyboxx pull NAME --into .env` | Write a key into an env file |
-| `keyboxx pull NAME --as VAR` | Write it under another name |
-| `keyboxx run NAME -- cmd` | Run `cmd` with the key set |
-| `keyboxx get NAME --raw` | Print it. Refuses without `--raw` |
-| `keyboxx rm NAME` | Remove a key |
+| `keyboxx list` | Services, purposes, masked previews |
+| `keyboxx pull openai --as VAR` | Write a key into `./.env` as `VAR` |
+| `keyboxx pull A=openai B=stripe` | Several at once |
+| `keyboxx run VAR=openai -- cmd` | Run `cmd` with the key set, no file |
+| `keyboxx get openai --raw` | Print it. Refuses without `--raw` |
+| `keyboxx rm openai` | Remove a key |
+
+Several keys for one service? Use the name from `keyboxx list` instead of the service.
 
 ## Teach your agent
 
