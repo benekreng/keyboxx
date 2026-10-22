@@ -16,26 +16,30 @@ export async function confirm(question, def = true) {
   return a === 'y' || a === 'yes';
 }
 
-// Read a line without echoing it. Handles paste, backspace and Ctrl-C.
-export function askHidden(question) {
+// Read a secret without echoing it. Instead of the characters, a live preview
+// from `preview(value)` is shown (e.g. "sk-…a3f2 (51 chars)") so you can check the paste.
+export function askSecret(question, preview) {
   return new Promise((resolve, reject) => {
     const stdin = process.stdin;
-    process.stderr.write(question);
+    let buf = '';
+    const render = () => process.stderr.write(`\r\x1b[2K${question}${buf ? preview(buf) : ''}`);
+
+    render();
     stdin.setRawMode(true);
     stdin.setEncoding('utf8');
     stdin.resume();
-    let buf = '';
 
     const finish = (err) => {
       stdin.removeListener('data', onData);
       stdin.setRawMode(false);
       stdin.pause();
+      render();
       process.stderr.write('\n');
       err ? reject(err) : resolve(buf);
     };
 
     const onData = (chunk) => {
-      chunk = chunk.replace(/\x1b\[20[01]~/g, ''); // bracketed-paste markers
+      chunk = chunk.replace(/\x1b\[[0-9;]*[~A-Za-z]/g, ''); // arrow keys, bracketed-paste markers
       for (const ch of chunk) {
         if (ch === '\r' || ch === '\n') return finish();
         if (ch === '\u0003' || ch === '\u0004') return finish(new Error('cancelled'));
@@ -43,6 +47,7 @@ export function askHidden(question) {
         if (ch < ' ') continue;
         buf += ch;
       }
+      render();
     };
     stdin.on('data', onData);
   });

@@ -23,7 +23,7 @@ Node 18+. No dependencies.
 keyboxx add
 # Service (e.g. OpenAI): OpenAI
 # Purpose (optional): side projects
-# Key (input hidden):
+# Key (paste it): sk-p…a3f2 (164 chars)
 ```
 
 Or pipe it: `pbpaste | keyboxx add --service OpenAI`

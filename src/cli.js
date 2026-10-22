@@ -4,7 +4,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { EnvFile, mask } from './dotenv.js';
 import { credentialsPath, readConfig, writeConfig, expandHome } from './config.js';
-import { ask, askHidden, confirm } from './prompt.js';
+import { ask, askSecret, confirm } from './prompt.js';
 
 const VALUE_FLAGS = new Set(['--into', '--as', '--env-file', '--service', '--purpose', '--name']);
 const BOOL_FLAGS = new Set(['--raw', '--json', '--yes', '-y', '--help', '-h']);
@@ -81,6 +81,11 @@ function defaultVarName(service) {
   return /(KEY|TOKEN|SECRET)$/.test(name) ? name : `${name}_API_KEY`;
 }
 
+// First and last characters only, so you can check a paste without showing the key.
+function previewKey(v) {
+  return v.length < 12 ? '•'.repeat(v.length) : `${v.slice(0, 4)}…${v.slice(-4)}`;
+}
+
 async function readStdin() {
   const chunks = [];
   for await (const c of process.stdin) chunks.push(c);
@@ -119,7 +124,7 @@ async function cmdAdd({ pos, flags }) {
   name ??= uniqueName(creds, defaultVarName(service));
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new UsageError(`"${name}" is not a valid name`);
 
-  const value = interactive ? await askHidden('Key (input hidden): ') : await readStdin();
+  const value = interactive ? await askSecret('Key (paste it): ', (v) => `${previewKey(v)} (${v.length} chars)`) : await readStdin();
   if (!value.trim()) throw new UsageError('empty key, nothing saved');
 
   creds.set(name, value.trim(), { service, purpose });
