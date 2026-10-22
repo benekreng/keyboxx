@@ -83,7 +83,7 @@ function defaultVarName(service) {
 
 // First and last characters only, so you can check a paste without showing the key.
 function previewKey(v) {
-  return v.length < 12 ? '•'.repeat(v.length) : `${v.slice(0, 4)}…${v.slice(-4)}`;
+  return v.length < 12 ? '*'.repeat(v.length) : `${v.slice(0, 4)}***${v.slice(-4)}`;
 }
 
 async function readStdin() {

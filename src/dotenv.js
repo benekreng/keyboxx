@@ -141,5 +141,5 @@ export class EnvFile {
 // Short hint to tell keys apart without exposing them.
 export function mask(value) {
   if (value.length < 12) return '*'.repeat(Math.min(value.length, 8));
-  return `${value.slice(0, 3)}…${value.slice(-4)}`;
+  return `${value.slice(0, 3)}***${value.slice(-4)}`;
 }

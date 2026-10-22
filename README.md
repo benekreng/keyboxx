@@ -4,7 +4,7 @@ Give AI agents your API keys without them ever seeing the value.
 
 ```bash
 keyboxx pull openai --as OPENAI_KEY --into .env
-# added OPENAI_KEY (OpenAI, sk-…wxyz) in ./.env
+# added OPENAI_KEY (OpenAI, sk-***wxyz) in ./.env
 ```
 
 You store a key once with a service and purpose. The agent finds the variable name the project wants and writes the key under that name. It only sees a masked preview.
@@ -23,7 +23,7 @@ Node 18+. No dependencies.
 keyboxx add
 # Service (e.g. OpenAI): OpenAI
 # Purpose (optional): side projects
-# Key (paste it): sk-p…a3f2 (164 chars)
+# Key (paste it): sk-p***a3f2 (164 chars)
 ```
 
 Or pipe it: `pbpaste | keyboxx add --service OpenAI`

@@ -17,7 +17,7 @@ export async function confirm(question, def = true) {
 }
 
 // Read a secret without echoing it. Instead of the characters, a live preview
-// from `preview(value)` is shown (e.g. "sk-…a3f2 (51 chars)") so you can check the paste.
+// from `preview(value)` is shown (e.g. "sk-***a3f2 (51 chars)") so you can check the paste.
 export function askSecret(question, preview) {
   return new Promise((resolve, reject) => {
     const stdin = process.stdin;
