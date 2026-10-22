@@ -1,0 +1,36 @@
+{
+  "name": "keyboxx",
+  "version": "0.1.0",
+  "description": "Give AI agents your API keys without them ever seeing the value",
+  "type": "module",
+  "bin": {
+    "keyboxx": "bin/keyboxx.js"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MPL-2.0",
+  "keywords": [
+    "api-keys",
+    "secrets",
+    "dotenv",
+    "env",
+    "cli",
+    "ai-agents",
+    "claude-code",
+    "codex"
+  ],
+  "author": "Benedikt Krengel",
+  "homepage": "https://github.com/benekreng/keyboxx",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/benekreng/keyboxx.git"
+  },
+  "bugs": {
+    "url": "https://github.com/benekreng/keyboxx/issues"
+  }
+}
