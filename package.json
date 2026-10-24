@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "Give AI agents your API keys without them ever seeing the value",
   "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
   "bin": {
     "keyboxx": "bin/keyboxx.js"
   },

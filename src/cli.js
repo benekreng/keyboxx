@@ -6,8 +6,8 @@ import { EnvFile, mask } from './dotenv.js';
 import { credentialsPath, readConfig, writeConfig, expandHome } from './config.js';
 import { ask, askSecret, confirm } from './prompt.js';
 
-const VALUE_FLAGS = new Set(['--into', '--as', '--env-file', '--service', '--purpose', '--name']);
-const BOOL_FLAGS = new Set(['--raw', '--json', '--yes', '-y', '--help', '-h']);
+const VALUE_FLAGS = new Set(['--into', '--as', '--env-file', '--service', '--purpose', '--name', '--remote-file']);
+const BOOL_FLAGS = new Set(['--raw', '--json', '--yes', '-y', '--help', '-h', '--force', '--dry-run']);
 
 class UsageError extends Error {}
 
@@ -23,6 +23,7 @@ function parseArgs(argv) {
       if (v === undefined) throw new UsageError(`${k} needs a value`);
       flags[k.slice(2)] = v;
     } else if (BOOL_FLAGS.has(k)) {
+      if (inline !== undefined) throw new UsageError(`${k} does not take a value`);
       flags[{ '-y': 'yes', '-h': 'help' }[k] ?? k.slice(2)] = true;
     } else if (a.startsWith('-') && a !== '-') {
       throw new UsageError(`unknown option ${a}`);
@@ -263,6 +264,16 @@ All commands
   path                           print the credentials file location
   agents                         print instructions for AGENTS.md / CLAUDE.md
 
+Optional SSH sync (requires keyboxx on both machines)
+  remote add NAME USER@HOST      save a destination; transfers nothing
+    --remote-file PATH           use a different credentials file remotely
+  remote list | remote rm NAME   list or forget destinations
+  sync push NAME                 send this machine's whole credentials file
+  sync fetch NAME                receive the remote whole credentials file
+  sync status NAME               compare files; show names, never values
+    --dry-run                    preview push/fetch without writing
+    --force                      replace a changed destination in full
+
 Options
   --env-file PATH                use this credentials file for one command
                                  (or set KEYBOXX_ENV_FILE)
@@ -271,6 +282,9 @@ Options
 const COMMANDS = {
   add: cmdAdd, list: cmdList, ls: cmdList, pull: cmdPull, run: cmdRun, get: cmdGet,
   rm: cmdRm, remove: cmdRm, path: cmdPath, use: cmdUse,
+  remote: async (args) => (await import('./sync.js')).cmdRemote(args),
+  sync: async (args) => (await import('./sync.js')).cmdSync(args),
+  _sync: async () => (await import('./sync.js')).serveSync(),
   agents: () => process.stdout.write(AGENT_SNIPPET),
   help: () => process.stdout.write(HELP),
 };

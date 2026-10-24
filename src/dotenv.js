@@ -7,10 +7,10 @@
 // The file stays a normal dotenv file that uv, docker compose, etc. can read.
 
 import fs from 'node:fs';
-import path from 'node:path';
+import { canonicalPath, digest, replaceText } from './storage.js';
 
-const ENTRY_RE = /^\s*(export\s+)?([A-Za-z_][A-Za-z0-9_.]*)\s*=\s?(.*)$/;
-const META_RE = /^\s*#\s*(service|purpose):\s?(.*)$/i;
+const ENTRY_RE = /^\s*(export\s+)?([A-Za-z_][A-Za-z0-9_.]*)\s*=\s?(.*)$/s;
+const META_RE = /^\s*#\s*(service|purpose):\s?(.*)$/is;
 
 function unescapeDouble(s) {
   return s.replace(/\\(.)/g, (_, c) => ({ n: '\n', r: '\r', t: '\t' })[c] ?? c);
@@ -25,15 +25,21 @@ function closingQuote(s, q, from) {
   return -1;
 }
 
-export function parse(text) {
+export function parse(text, { strict = false } = {}) {
+  const names = new Set();
   const lines = text.split('\n');
   if (lines.length && lines[lines.length - 1] === '') lines.pop();
   const entries = [];
 
   for (let i = 0; i < lines.length; i++) {
     const m = ENTRY_RE.exec(lines[i]);
-    if (!m) continue;
+    if (!m) {
+      if (strict && lines[i].trim() && !lines[i].trimStart().startsWith('#')) throw new Error('invalid credentials format');
+      continue;
+    }
     const [, exported, name, rest] = m;
+    if (strict && names.has(name)) throw new Error('duplicate credentials name');
+    names.add(name);
     const valueStart = i;
     let value;
     const q = rest[0];
@@ -46,10 +52,11 @@ export function parse(text) {
         buf += '\n' + lines[++i];
         close = closingQuote(buf, q, 1);
       }
+      if (strict && (close < 0 || !/^\s*(#.*)?$/s.test(buf.slice(close + 1)))) throw new Error('invalid quoted credentials value');
       const inner = close < 0 ? buf.slice(1) : buf.slice(1, close);
       value = q === '"' ? unescapeDouble(inner) : inner;
     } else {
-      value = rest.replace(/\s+#.*$/, '').trim();
+      value = rest.replace(/\s+#.*$/s, '').trim();
     }
 
     // Collect "# service:" / "# purpose:" comments right above the entry.
@@ -75,10 +82,12 @@ export function formatValue(v) {
 
 export class EnvFile {
   constructor(file) {
-    this.file = path.resolve(file);
+    this.file = canonicalPath(file);
     this.exists = fs.existsSync(this.file);
     this.mode = this.exists ? fs.statSync(this.file).mode & 0o777 : 0o600;
-    this.#load(this.exists ? fs.readFileSync(this.file, 'utf8') : '');
+    const text = this.exists ? fs.readFileSync(this.file, 'utf8') : null;
+    this.originalDigest = digest(text);
+    this.#load(text ?? '');
   }
 
   #load(text) {
@@ -129,11 +138,9 @@ export class EnvFile {
   }
 
   save() {
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    const tmp = path.join(path.dirname(this.file), `.${path.basename(this.file)}.${process.pid}.tmp`);
-    fs.writeFileSync(tmp, this.lines.join('\n') + '\n', { mode: this.mode });
-    fs.chmodSync(tmp, this.mode);
-    fs.renameSync(tmp, this.file);
+    const text = this.lines.join('\n') + '\n';
+    replaceText(this.file, text, this.originalDigest, this.mode);
+    this.originalDigest = digest(text);
     this.exists = true;
   }
 }
